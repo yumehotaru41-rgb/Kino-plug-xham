@@ -291,6 +291,50 @@ function heightOf(q) {
   return m ? parseInt(m[1], 10) : 0;
 }
 
+// ---------- HLS ----------
+
+// Resuelve una URI de playlist relativa contra la URL del master.
+function joinUrl(base, u) {
+  if (/^https?:\/\//i.test(u)) return u;
+  const noQuery = base.split("#")[0].split("?")[0];
+  const schemeHost = noQuery.match(/^https?:\/\/[^\/]+/);
+  if (u.charAt(0) === "/") {
+    return (schemeHost ? schemeHost[0] : "") + u;
+  }
+  const dir = noQuery.slice(0, noQuery.lastIndexOf("/") + 1);
+  return dir + u;
+}
+
+// Lee el master m3u8 y devuelve una copia por calidad (sub-playlist HLS).
+// Estas variantes sí las sirve el CDN; los MP4 firmados del reproductor
+// suelen fallar con "Wrong key", así que el selector se arma con HLS.
+async function hlsVariants(masterUrl) {
+  const txt = await get(masterUrl);
+  const lines = txt.split("\n");
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line.indexOf("#EXT-X-STREAM-INF") !== 0) continue;
+    const res = line.match(/RESOLUTION=(\d{2,5})x(\d{2,5})/i);
+    const height = res ? parseInt(res[2], 10) : 0;
+    // la URI va en la línea siguiente que no sea comentario
+    let uri = null;
+    for (let j = i + 1; j < lines.length; j++) {
+      const t = lines[j].trim();
+      if (!t) continue;
+      if (t.charAt(0) === "#") continue;
+      uri = t;
+      i = j;
+      break;
+    }
+    if (!uri) continue;
+    const url = joinUrl(masterUrl, uri);
+    if (url === masterUrl) continue;
+    out.push({ url: url, height: height, label: height > 0 ? height + "p · HLS" : "HLS (auto)" });
+  }
+  return out;
+}
+
 // ---------- capacidades ----------
 
 export async function search(arg) {
@@ -376,14 +420,28 @@ export async function resolve(ref) {
     const b = decipherUrl(hs.fallback);
     if (a || b) {
       hls = { url: a || b, mime: HLS_MIME, height: 9999, label: "Auto (HLS)" };
-      // la otra copia, si difiere, va como respaldo de la misma calidad
+      // la otra copia, si difiere, va como respaldo del Auto
       if (a && b && a !== b) {
-        copies.push({ url: b, mime: HLS_MIME, height: 9998, label: "Auto (HLS) · respaldo" });
+        copies.push({ url: b, mime: HLS_MIME, height: 9998, label: "Auto (HLS) · respaldo", g: 0 });
       }
     }
   }
 
-  // MP4 del reproductor (cifrados): una copia por calidad
+  // Selector de calidades basado en las variantes del propio master HLS:
+  // cada calidad es su sub-playlist, que el CDN sirve sin problemas.
+  if (hls) {
+    try {
+      const variants = await hlsVariants(hls.url);
+      for (let i = 0; i < variants.length; i++) {
+        copies.push({ url: variants[i].url, mime: HLS_MIME, height: variants[i].height, label: variants[i].label, g: 1 });
+      }
+    } catch (e) {
+      // sin variantes, el selector queda con Auto y los MP4
+    }
+  }
+
+  // MP4 del reproductor (cifrados): de último recurso, porque el CDN suele
+  // rechazarlos fuera de su reproductor ("Wrong key")
   const std = xp.standard;
   if (std && typeof std === "object") {
     Object.keys(std).forEach(function (key) {
@@ -403,14 +461,15 @@ export async function resolve(ref) {
             mime: mime,
             height: h,
             // el selector del reproductor muestra este nombre: "1080p · MP4"
-            label: clip(name + (mime === HLS_MIME ? " · HLS" : " · MP4") + (ki === 1 ? " · respaldo" : ""), 48)
+            label: clip(name + (mime === HLS_MIME ? " · HLS" : " · MP4") + (ki === 1 ? " · respaldo" : ""), 48),
+            g: 2
           });
         });
       });
     });
   }
 
-  // MP4 directos del modelo (sin cifrar), como respaldo si el reproductor falla
+  // MP4 directos del modelo (sin cifrar), como último respaldo
   const src = model.sources;
   if (src && typeof src === "object") {
     Object.keys(src).forEach(function (kind) {
@@ -421,26 +480,24 @@ export async function resolve(ref) {
         const u = q[quality];
         if (typeof u === "string" && /^https:\/\//.test(u)) {
           const h = heightOf(quality);
-          copies.push({ url: u, mime: "video/mp4", height: h, label: clip(quality + " · MP4", 48) });
+          copies.push({ url: u, mime: "video/mp4", height: h, label: clip(quality + " · MP4", 48), g: 2 });
         }
       });
     });
   }
 
-  // mejor calidad primero: así aparece el selector de calidades del reproductor
-  copies.sort(function (a, b) { return b.height - a.height; });
+  // mejor calidad primero; el grupo (g) mantiene las variantes HLS por encima
+  // de los MP4 (respaldo 0 < variantes HLS 1 < MP4 2), y a igual grupo gana la altura
+  copies.sort(function (a, b) { return (a.g || 0) - (b.g || 0) || b.height - a.height; });
 
-  // quita duplicados (por URL y por calidad: una copia por calidad) y promos
+  // quita duplicados (por URL) y promos que no sean archivo/playlist
   const seen = {};
-  const seenHeight = {};
   const alts = [];
   for (let i = 0; i < copies.length && alts.length < 8; i++) {
     const a = copies[i];
     if (seen[a.url]) continue;
     if (!/\.(mp4|m3u8|ts)([\/?#]|$)/i.test(a.url) && a.mime !== HLS_MIME) continue;
-    if (a.height > 0 && a.height < 9000 && seenHeight[a.height]) continue; // esa calidad ya está
     seen[a.url] = true;
-    if (a.height > 0 && a.height < 9000) seenHeight[a.height] = true;
     alts.push({ url: a.url, mime: a.mime, label: a.label, headers: headers });
   }
 
