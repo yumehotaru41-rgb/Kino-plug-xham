@@ -1,7 +1,7 @@
 {
   "id": "xhamster",
   "name": "Xhamster",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "apiVersion": 6,
   "entry": "plugin.js",
   "description": "Videos de xHamster en Kino: búsqueda, filas de Inicio (recomendados, novedades, más vistos, mejor valorados, MILF, amateur, JAV, hentai, cosplay y homemade), «Ver más» paginado y reproducción en HLS con selector de calidades MP4. Contenido 18+.",
@@ -13,6 +13,8 @@
     "*.xhamster.com",
     "xhcdn.com",
     "*.xhcdn.com",
+    "flixcdn.com",
+    "*.flixcdn.com",
     "xhamster.one",
     "xhamster.desi",
     "xhms.pro",

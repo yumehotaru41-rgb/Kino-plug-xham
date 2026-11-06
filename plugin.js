@@ -84,8 +84,22 @@ function durBadge(sec) {
 
 // ---------- ítems ----------
 
+// Palabras que delatan contenido trans (en cualquier idioma habitual del
+// sitio): el título puede venir con entidades HTML, así que se prueba tras
+// desescapar. Se filtra también por categorías y por la URL del video.
+const TRANS_RE = /(^|[^a-zà-ÿ])(trans[a-z]*|shemale|travest[a-z]*|tranny|ladyboy|t-?girl|kathoey|sissy|futanari|ts)([^a-zà-ÿ]|$)/i;
+
+function isTransEntry(e, url) {
+  const cats = Array.isArray(e.categories) ? e.categories.join(" ") : String(e.categories || e.category || e.keywords || "");
+  const text = unescape(e.title || "") + " " + cats;
+  if (TRANS_RE.test(text)) return true;
+  if (/\/(shemale|trans)[\/-]/i.test(url)) return true;
+  return false;
+}
+
 // Un video publicitario o de pago nunca es reproducible gratis: se descarta
 // por sus marcas y por su URL, y se exige duración y ficha de video real.
+// Los videos trans se descartan en todas las filas y búsquedas.
 function isPlayableEntry(e) {
   if (!e || typeof e !== "object") return false;
   const url = e.pageURL || "";
@@ -94,6 +108,7 @@ function isPlayableEntry(e) {
   if (e.isPremium === true || e.premium === true) return false;
   if (e.isPaid === true || e.paid === true || e.requiredPremium === true) return false;
   if (e.isFH === true || e.exclusive === true) return false;
+  if (isTransEntry(e, url)) return false;
   const d = Number(e.duration) || 0;
   if (d <= 0) return false;
   return true;
