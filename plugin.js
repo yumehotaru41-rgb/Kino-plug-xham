@@ -132,8 +132,10 @@ const ROWS = [
   { id: "best",    title: "Mejor valorados",   path: "/best" },
   { id: "milf",    title: "MILF",             search: "milf" },
   { id: "amateur", title: "Amateur",          search: "amateur" },
-  { id: "gay",     title: "Gay",              path: "/gay" },
-  { id: "trans",   title: "Trans",            path: "/shemale" }
+  { id: "jav",     title: "JAV",              search: "jav" },
+  { id: "hentai",  title: "Hentai",           search: "hentai" },
+  { id: "cosplay", title: "Cosplay",          search: "cosplay" },
+  { id: "homemade", title: "Homemade",        search: "homemade" }
 ];
 
 function rowUrl(cfg, page) {
@@ -333,7 +335,7 @@ export async function resolve(ref) {
   const xp = (data.xplayerSettings && data.xplayerSettings.sources) || {};
 
   const headers = { "Referer": pageUrl, "User-Agent": UA };
-  const mp4s = [];
+  const copies = [];
 
   // HLS cifrado del reproductor (la mejor opción: se adapta al ancho de banda)
   let hls = null;
@@ -342,15 +344,15 @@ export async function resolve(ref) {
     const a = decipherUrl(hs.url);
     const b = decipherUrl(hs.fallback);
     if (a || b) {
-      hls = { url: a || b, mime: HLS_MIME, label: "HLS (auto)" };
-      // la otra copia, si difiere, va como alternativa
+      hls = { url: a || b, mime: HLS_MIME, height: 9999, label: "Auto (HLS)" };
+      // la otra copia, si difiere, va como respaldo de la misma calidad
       if (a && b && a !== b) {
-        mp4s.push({ url: b, mime: HLS_MIME, label: "HLS alterno", height: 9999 });
+        copies.push({ url: b, mime: HLS_MIME, height: 9998, label: "Auto (HLS) · respaldo" });
       }
     }
   }
 
-  // MP4 del reproductor (cifrados), ordenados de mayor a menor calidad
+  // MP4 del reproductor (cifrados): una copia por calidad
   const std = xp.standard;
   if (std && typeof std === "object") {
     Object.keys(std).forEach(function (key) {
@@ -358,19 +360,26 @@ export async function resolve(ref) {
       if (!Array.isArray(list)) return;
       list.forEach(function (f) {
         if (!f || typeof f !== "object") return;
-        ["url", "fallback"].forEach(function (k) {
+        const quality = String(f.label || f.quality || "").trim();
+        const h = heightOf(f.quality || f.label);
+        const name = quality || (h > 0 ? h + "p" : "MP4");
+        ["url", "fallback"].forEach(function (k, ki) {
           const u = decipherUrl(f[k]);
           if (!u) return;
-          const h = heightOf(f.quality || f.label);
           const mime = u.slice(-5).indexOf(".m3u8") !== -1 ? HLS_MIME : "video/mp4";
-          const label = (mime === HLS_MIME ? "HLS" : "MP4") + " " + (f.label || f.quality || "");
-          mp4s.push({ url: u, mime: mime, label: label, height: h });
+          copies.push({
+            url: u,
+            mime: mime,
+            height: h,
+            // el selector del reproductor muestra este nombre: "1080p · MP4"
+            label: clip(name + (mime === HLS_MIME ? " · HLS" : " · MP4") + (ki === 1 ? " · respaldo" : ""), 48)
+          });
         });
       });
     });
   }
 
-  // MP4 directos del modelo (sin cifrar), como respaldo
+  // MP4 directos del modelo (sin cifrar), como respaldo si el reproductor falla
   const src = model.sources;
   if (src && typeof src === "object") {
     Object.keys(src).forEach(function (kind) {
@@ -380,23 +389,28 @@ export async function resolve(ref) {
       Object.keys(q).forEach(function (quality) {
         const u = q[quality];
         if (typeof u === "string" && /^https:\/\//.test(u)) {
-          mp4s.push({ url: u, mime: "video/mp4", label: "MP4 " + quality, height: heightOf(quality) });
+          const h = heightOf(quality);
+          copies.push({ url: u, mime: "video/mp4", height: h, label: clip(quality + " · MP4", 48) });
         }
       });
     });
   }
 
-  mp4s.sort(function (a, b) { return b.height - a.height; });
+  // mejor calidad primero: así aparece el selector de calidades del reproductor
+  copies.sort(function (a, b) { return b.height - a.height; });
 
-  // quita duplicados y promos que no sean archivo/playlist
+  // quita duplicados (por URL y por calidad: una copia por calidad) y promos
   const seen = {};
+  const seenHeight = {};
   const alts = [];
-  for (let i = 0; i < mp4s.length && alts.length < 7; i++) {
-    const a = mp4s[i];
+  for (let i = 0; i < copies.length && alts.length < 8; i++) {
+    const a = copies[i];
     if (seen[a.url]) continue;
     if (!/\.(mp4|m3u8|ts)([\/?#]|$)/i.test(a.url) && a.mime !== HLS_MIME) continue;
+    if (a.height > 0 && a.height < 9000 && seenHeight[a.height]) continue; // esa calidad ya está
     seen[a.url] = true;
-    alts.push({ url: a.url, mime: a.mime, label: a.label.slice(0, 48), headers: headers });
+    if (a.height > 0 && a.height < 9000) seenHeight[a.height] = true;
+    alts.push({ url: a.url, mime: a.mime, label: a.label, headers: headers });
   }
 
   const primary = hls || (alts.length > 0 ? alts.shift() : null);
@@ -404,11 +418,12 @@ export async function resolve(ref) {
     throw kino.error("not_found", "sin enlaces", { userMessage: "No se encontró un enlace reproducible (puede ser un video premium o privado)." });
   }
 
+  const isHls = hls && primary === hls;
   const stream = {
     url: primary.url,
     mime: primary.mime || HLS_MIME,
     headers: headers,
-    label: "Mejor servidor (" + (primary.label || "auto") + ")"
+    label: isHls ? "Auto (HLS)" : clip(primary.label + " · mejor servidor", 48)
   };
   if (alts.length > 0) stream.alternatives = alts.slice(0, 7);
   const d = Number(model.duration) || 0;
