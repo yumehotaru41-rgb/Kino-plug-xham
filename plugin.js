@@ -10,14 +10,18 @@ const HLS_MIME = "application/x-mpegurl";
 
 // ---------- red ----------
 
-async function get(url) {
+async function get(url, extraHeaders) {
+  const headers = {
+    "User-Agent": UA,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": (kino.lang || "").indexOf("en") === 0 ? "en-US,en;q=0.8" : "es-419,es;q=0.8,en;q=0.6"
+  };
+  if (extraHeaders) {
+    Object.keys(extraHeaders).forEach(function (k) { headers[k] = extraHeaders[k]; });
+  }
   const r = await kino.fetch(url, {
     method: "GET",
-    headers: {
-      "User-Agent": UA,
-      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": (kino.lang || "").indexOf("en") === 0 ? "en-US,en;q=0.8" : "es-419,es;q=0.8,en;q=0.6"
-    },
+    headers: headers,
     timeoutMs: 20000
   });
   if (r.status === 404) {
@@ -31,8 +35,11 @@ async function get(url) {
 
 // ---------- window.initials ----------
 
+// Dos patrones, como el extractor de yt-dlp: el clásico con </script>
+// y uno de respaldo sin él, por si xHamster cambia el final del script.
 function parseInitials(html) {
-  const m = html.match(/window\.initials\s*=\s*(\{[\s\S]+?\})\s*;\s*<\/script>/);
+  let m = html.match(/window\.initials\s*=\s*(\{[\s\S]+?\})\s*;\s*<\/script>/);
+  if (!m) m = html.match(/window\.initials\s*=\s*(\{[\s\S]+?\})\s*;/);
   if (!m) return null;
   try {
     return JSON.parse(m[1]);
@@ -212,6 +219,7 @@ function findRow(ref) {
 }
 
 // ---------- descifrado de enlaces (xplayer) ----------
+// Algoritmos 1-7, idénticos al extractor de yt-dlp (2026).
 
 function stepBytes(id, st) {
   let s = st.s;
@@ -302,6 +310,11 @@ function decipherUrl(u) {
   return m[1] + "/" + dec + m[3] + (m[4] || "") + (m[5] || "");
 }
 
+function heightOf(q) {
+  const m = String(q || "").match(/(\d{3,4})/);
+  return m ? parseInt(m[1], 10) : 0;
+}
+
 // ---------- HLS ----------
 
 // Resuelve una URI de playlist relativa contra la URL del master.
@@ -318,9 +331,9 @@ function joinUrl(base, u) {
 
 // Lee el master m3u8 y devuelve una copia por calidad (sub-playlist HLS).
 // El CDN de xhcdn rechaza los MP4 firmados fuera de su reproductor con
-// HTTP 403 ("Wrong key"), así que el selector se arma SOLO con HLS.
-async function hlsVariants(masterUrl) {
-  const txt = await get(masterUrl);
+// HTTP 403 ("Wrong key"), así que el selector se arma con HLS primero.
+async function hlsVariants(masterUrl, referer) {
+  const txt = await get(masterUrl, referer ? { "Referer": referer, "Accept": "*/*" } : null);
   const lines = txt.split("\n");
   const out = [];
   for (let i = 0; i < lines.length; i++) {
@@ -402,8 +415,10 @@ export async function browse(ref, cursor) {
   return { items: out.items, next: String(out.last + 1) };
 }
 
-// Solo HLS: los MP4 firmados de xhcdn responden 403 ("Wrong key") fuera del
-// reproductor oficial (fallan incluso en yt-dlp), así que no se ofrecen.
+// Reproducción: HLS prioritario (Auto + variantes del master) y los MP4 solo
+// como último recurso. Si un video no trae HLS descifrable, NO se lanza
+// error: se reproduce el mejor MP4 disponible (yt-dlp hace lo mismo:
+// salta el formato fallido y sigue con los demás).
 export async function resolve(ref) {
   await Promise.resolve();
   const m = String(ref || "").match(/^v\|(.+)$/);
@@ -425,7 +440,7 @@ export async function resolve(ref) {
   const headers = { "Referer": pageUrl, "User-Agent": UA };
   const copies = [];
 
-  // HLS cifrado del reproductor (la mejor opción: se adapta al ancho de banda)
+  // 1) HLS cifrado del reproductor: la mejor opción (se adapta al ancho de banda)
   let hls = null;
   const hs = xp.hls;
   if (hs && typeof hs === "object") {
@@ -435,31 +450,72 @@ export async function resolve(ref) {
       hls = { url: a || b, mime: HLS_MIME, height: 9999, label: "Auto (HLS)" };
       // la otra copia, si difiere, va como respaldo del Auto
       if (a && b && a !== b) {
-        copies.push({ url: b, mime: HLS_MIME, height: 9998, label: "Auto (HLS) · respaldo" });
+        copies.push({ url: b, mime: HLS_MIME, height: 9998, label: "Auto (HLS) · respaldo", g: 0 });
       }
     }
   }
 
-  // Selector de calidades basado en las variantes del propio master HLS:
+  // 2) Selector de calidades con las variantes del propio master HLS:
   // cada calidad es su sub-playlist, que el CDN sirve sin problemas.
   if (hls) {
     try {
-      const variants = await hlsVariants(hls.url);
+      const variants = await hlsVariants(hls.url, pageUrl);
       for (let i = 0; i < variants.length; i++) {
-        copies.push({ url: variants[i].url, mime: HLS_MIME, height: variants[i].height, label: variants[i].label });
+        copies.push({ url: variants[i].url, mime: HLS_MIME, height: variants[i].height, label: variants[i].label, g: 1 });
       }
     } catch (e) {
-      // sin variantes, el selector queda solo con Auto (HLS) y su respaldo
+      // sin variantes, el selector queda con Auto y los MP4
     }
   }
 
-  if (!hls) {
-    // video sin HLS disponible (p.ej. premium o privado): no hay nada reproducible
-    throw kino.error("not_found", "sin HLS", { userMessage: "Este video no tiene reproducción HLS disponible (puede ser premium o privado). Prueba con otro." });
+  // 3) MP4 del reproductor (cifrados): último recurso, porque el CDN suele
+  // rechazarlos fuera de su reproductor ("Wrong key"). Solo importan si
+  // no hay HLS; si lo hay, quedan al final del selector por si acaso.
+  const std = xp.standard;
+  if (std && typeof std === "object") {
+    Object.keys(std).forEach(function (key) {
+      const list = std[key];
+      if (!Array.isArray(list)) return;
+      list.forEach(function (f) {
+        if (!f || typeof f !== "object") return;
+        const quality = String(f.label || f.quality || "").trim();
+        const h = heightOf(f.quality || f.label);
+        const name = quality || (h > 0 ? h + "p" : "MP4");
+        ["url", "fallback"].forEach(function (k, ki) {
+          const u = decipherUrl(f[k]);
+          if (!u) return;
+          const mime = u.slice(-5).indexOf(".m3u8") !== -1 ? HLS_MIME : "video/mp4";
+          copies.push({
+            url: u,
+            mime: mime,
+            height: h,
+            label: clip(name + (mime === HLS_MIME ? " · HLS" : " · MP4") + (ki === 1 ? " · respaldo" : ""), 48),
+            g: mime === HLS_MIME ? 1 : 2
+          });
+        });
+      });
+    });
   }
 
-  // mejor calidad primero
-  copies.sort(function (a, b) { return b.height - a.height; });
+  // 4) MP4 directos del modelo (sin cifrar), como último respaldo
+  const src = model.sources;
+  if (src && typeof src === "object") {
+    Object.keys(src).forEach(function (kind) {
+      if (kind === "download") return;
+      const q = src[kind];
+      if (!q || typeof q !== "object") return;
+      Object.keys(q).forEach(function (quality) {
+        const u = q[quality];
+        if (typeof u === "string" && /^https:\/\//.test(u)) {
+          const h = heightOf(quality);
+          copies.push({ url: u, mime: "video/mp4", height: h, label: clip(quality + " · MP4", 48), g: 2 });
+        }
+      });
+    });
+  }
+
+  // Orden: respaldo del Auto > variantes HLS > MP4s; a igual grupo, altura
+  copies.sort(function (a, b) { return (a.g || 0) - (b.g || 0) || b.height - a.height; });
 
   // quita duplicados por URL
   const seen = {};
@@ -471,11 +527,18 @@ export async function resolve(ref) {
     alts.push({ url: a.url, mime: a.mime, label: a.label, headers: headers });
   }
 
+  // Primaria: Auto (HLS); si no hay HLS, el mejor enlace disponible (MP4)
+  const primary = hls || (alts.length > 0 ? alts.shift() : null);
+  if (!primary) {
+    throw kino.error("not_found", "sin enlaces", { userMessage: "No se encontró un enlace reproducible (puede ser un video premium o privado). Prueba con otro." });
+  }
+
+  const isHls = hls && primary === hls;
   const stream = {
-    url: hls.url,
-    mime: HLS_MIME,
+    url: primary.url,
+    mime: primary.mime || HLS_MIME,
     headers: headers,
-    label: "Auto (HLS)"
+    label: isHls ? "Auto (HLS)" : clip(primary.label + " · mejor servidor", 48)
   };
   if (alts.length > 0) stream.alternatives = alts.slice(0, 7);
   const d = Number(model.duration) || 0;

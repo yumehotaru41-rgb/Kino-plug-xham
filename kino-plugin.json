@@ -1,10 +1,10 @@
 {
   "id": "xhamster",
   "name": "Xhamster",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "apiVersion": 6,
   "entry": "plugin.js",
-  "description": "Videos de xHamster en Kino: búsqueda, filas de Inicio (recomendados, novedades, más vistos, mejor valorados, MILF, amateur, JAV, hentai, cosplay y homemade), «Ver más» paginado y reproducción exclusivamente en HLS con selector de calidades (variantes HLS del master). Solo contenido heterosexual. Contenido 18+.",
+  "description": "Videos de xHamster en Kino: búsqueda, filas de Inicio (recomendados, novedades, más vistos, mejor valorados, MILF, amateur, JAV, hentai, cosplay y homemade), «Ver más» paginado y reproducción HLS prioritaria con selector de calidades (variantes HLS del master; MP4 solo como respaldo si no hay HLS). Solo contenido heterosexual. Contenido 18+.",
   "author": "Hotaru Yume",
   "creator": "hotaruyume",
   "homepage": "https://github.com/yumehotaru41-rgb/Kino-plug-xham",
@@ -21,8 +21,15 @@
     "xhday.com",
     "xhvid.com"
   ],
-  "capabilities": ["search", "home", "browse", "resolve"],
-  "categories": ["adult"],
+  "capabilities": [
+    "search",
+    "home",
+    "browse",
+    "resolve"
+  ],
+  "categories": [
+    "adult"
+  ],
   "theme": {
     "accent": "#1273B8",
     "onAccent": "#FFFFFF",
