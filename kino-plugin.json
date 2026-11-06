@@ -1,7 +1,7 @@
 {
   "id": "xhamster",
   "name": "Xhamster",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "apiVersion": 6,
   "entry": "plugin.js",
   "description": "Videos de xHamster en Kino: búsqueda, filas de Inicio (recomendados, novedades, más vistos, mejor valorados, MILF, amateur, JAV, hentai, cosplay y homemade), «Ver más» paginado y reproducción HLS prioritaria con selector de calidades (variantes HLS del master; MP4 solo como respaldo si no hay HLS). Solo contenido heterosexual. Contenido 18+.",

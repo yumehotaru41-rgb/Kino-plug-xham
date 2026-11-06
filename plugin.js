@@ -150,7 +150,13 @@ function toItem(e) {
     kind: "movie",
     adult: true
   };
-  if (img) item.backdrop = img; // miniatura horizontal 16:9
+  if (img) {
+    // Las filas del Home usan backdrop (16:9) y la cuadrícula de «Ver más»
+    // usa poster (retrato): se rellenan los dos con la misma miniatura,
+    // sin peticiones extra, para que la imagen salga en ambas vistas.
+    item.backdrop = img;
+    item.poster = img;
+  }
   const d = Number(e.duration) || 0;
   if (d > 0) {
     item.runtimeMinutes = Math.max(1, Math.round(d / 60));
