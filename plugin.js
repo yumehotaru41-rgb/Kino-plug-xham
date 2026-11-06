@@ -89,17 +89,32 @@ function durBadge(sec) {
 // desescapar. Se filtra también por categorías y por la URL del video.
 const TRANS_RE = /(^|[^a-zà-ÿ])(trans[a-z]*|shemale|travest[a-z]*|tranny|ladyboy|t-?girl|kathoey|sissy|futanari|ts)([^a-zà-ÿ]|$)/i;
 
-function isTransEntry(e, url) {
+// xHamster tiene 3 modos (heterosexual, gay, trans). El plugin solo consulta
+// URLs del modo heterosexual (nunca /gay/ ni /shemale/), pero por si un video
+// gay se cuela en una búsqueda genérica, se descarta igual que los trans.
+const GAY_RE = /(^|[^a-zà-ÿ])(gay|gays|homosexual[a-z]*|twink[a-z]*|queer|brokeback)([^a-zà-ÿ]|$)/i;
+
+function entryText(e) {
   const cats = Array.isArray(e.categories) ? e.categories.join(" ") : String(e.categories || e.category || e.keywords || "");
-  const text = unescape(e.title || "") + " " + cats;
-  if (TRANS_RE.test(text)) return true;
+  return unescape(e.title || "") + " " + cats;
+}
+
+function isTransEntry(e, url) {
+  if (TRANS_RE.test(entryText(e))) return true;
   if (/\/(shemale|trans)[\/-]/i.test(url)) return true;
+  return false;
+}
+
+function isGayEntry(e, url) {
+  if (GAY_RE.test(entryText(e))) return true;
+  if (/\/(gay)[\/-]/i.test(url)) return true;
   return false;
 }
 
 // Un video publicitario o de pago nunca es reproducible gratis: se descarta
 // por sus marcas y por su URL, y se exige duración y ficha de video real.
-// Los videos trans se descartan en todas las filas y búsquedas.
+// Los videos trans y gay se descartan en todas las filas y búsquedas:
+// solo se listan videos del modo heterosexual de xHamster.
 function isPlayableEntry(e) {
   if (!e || typeof e !== "object") return false;
   const url = e.pageURL || "";
@@ -109,6 +124,7 @@ function isPlayableEntry(e) {
   if (e.isPaid === true || e.paid === true || e.requiredPremium === true) return false;
   if (e.isFH === true || e.exclusive === true) return false;
   if (isTransEntry(e, url)) return false;
+  if (isGayEntry(e, url)) return false;
   const d = Number(e.duration) || 0;
   if (d <= 0) return false;
   return true;
