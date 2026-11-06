@@ -290,17 +290,33 @@ export async function search(arg) {
 }
 
 export async function home() {
+  // Todo en paralelo (kino.fetch encola a 6 concurrentes): en serie se
+  // pasaba del límite de 20 s del Home. Cada fila trae sus 2 páginas a la vez.
+  const settled = await Promise.allSettled(ROWS.map(function (cfg) {
+    const both = [collect(cfg, 1, 60, 1), collect(cfg, 2, 60, 1)];
+    return Promise.all(both.map(function (p) { return p.catch(function () { return { items: [], last: 0 }; }); }))
+      .then(function (parts) {
+        const items = [];
+        const seen = {};
+        for (let pi = 0; pi < parts.length; pi++) {
+          const got = parts[pi].items;
+          for (let i = 0; i < got.length && items.length < 60; i++) {
+            if (seen[got[i].id]) continue;
+            seen[got[i].id] = true;
+            items.push(got[i]);
+          }
+        }
+        return { items: items, last: parts[0].last };
+      });
+  }));
   const rows = [];
   for (let i = 0; i < ROWS.length; i++) {
-    const cfg = ROWS[i];
-    try {
-      const out = await collect(cfg, 1, 60, 2); // máximo permitido: 60 por fila
-      if (out.items.length > 0) {
-        rows.push({ id: cfg.id, title: cfg.title, ref: "row:" + cfg.id, genre: "otros", items: out.items });
-      }
-    } catch (e) {
-      // una fila que falla no tumba las demás
+    const st = settled[i];
+    if (st.status === "fulfilled" && st.value.items.length > 0) {
+      const cfg = ROWS[i];
+      rows.push({ id: cfg.id, title: cfg.title, ref: "row:" + cfg.id, genre: "otros", items: st.value.items });
     }
+    // una fila que falla no tumba las demás
   }
   return rows;
 }
