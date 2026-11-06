@@ -1,0 +1,33 @@
+{
+  "id": "xhamster",
+  "name": "Xhamster",
+  "version": "1.0.0",
+  "apiVersion": 6,
+  "entry": "plugin.js",
+  "description": "Videos de xHamster en Kino: búsqueda, filas de Inicio (recomendados, novedades, más vistos, mejor valorados, MILF, amateur, gay y trans), «Ver más» paginado y reproducción en HLS con copias MP4 por calidad. Contenido 18+.",
+  "author": "Hotaru Yume",
+  "creator": "hotaruyume",
+  "homepage": "https://github.com/yumehotaru41-rgb/Kino-plug-xham",
+  "hosts": [
+    "xhamster.com",
+    "*.xhamster.com",
+    "xhcdn.com",
+    "*.xhcdn.com",
+    "xhamster.one",
+    "xhamster.desi",
+    "xhms.pro",
+    "xhday.com",
+    "xhvid.com"
+  ],
+  "capabilities": ["search", "home", "browse", "resolve"],
+  "categories": ["adult"],
+  "theme": {
+    "accent": "#1273B8",
+    "onAccent": "#FFFFFF",
+    "background": "#0B0E13",
+    "surface": "#161D26",
+    "highlight": "#F2F6FA"
+  },
+  "color": "#1273B8",
+  "icon": "icon.png"
+}
